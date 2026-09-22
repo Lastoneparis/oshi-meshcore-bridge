@@ -1,0 +1,57 @@
+# OSHI <-> MeshCore bridge. Copy to oshi_bridge.ini and edit the ports.
+# python run_oshi_bridge.py -c oshi_bridge.ini
+
+[meshtastic]
+# The radio must run STOCK Meshtastic firmware (2.5+), not OSHI firmware, and carry a
+# channel named OSHI with the OSHI PSK (README: "Meshtastic radio setup").
+transport = serial
+# port = /dev/ttyUSB0          ; empty = meshtastic-python auto-detect
+# transport = tcp
+# host = 192.168.1.50
+channel_name = OSHI
+
+[meshcore]
+# A MeshCore companion-radio firmware v1.15+ (USB serial, TCP/WiFi or BLE).
+transport = serial
+port = /dev/ttyACM0
+baud = 115200
+# host = 192.168.1.60
+# tcp_port = 5000
+# ble_address = AA:BB:CC:DD:EE:FF
+# Dedicated channel slot for OSHI traffic. Every bridge that should interoperate
+# must use the same channel name/secret and data_type. The bridge writes this slot
+# on start (configure_channel = true) - pick one your MeshCore app does not use.
+channel_idx = 7
+channel_name = #oshi-bridge
+# 32 hex chars for a private channel; empty = derived from a '#name' (public hashtag channel)
+channel_secret_hex =
+configure_channel = true
+# MeshCore GRP_DATA application id; 0xFF00-0xFFFE is the unregistered dev range
+data_type = 0xFF4F
+
+[bridge]
+forward_broadcast = true
+inject_only_known_dests = false
+strict_sack_auth = false
+# bytes per MeshCore datagram, envelope included (MeshCore accepts up to 163-165)
+max_datagram = 160
+loop_ttl_s = 600
+repeat_s = 15
+max_forwards = 6
+receipt_resend_s = 60
+max_queue = 256
+# airtime budget per radio, percent of duty_window_s (EU 869.4-869.65 MHz allows 10 %)
+mesh_duty_percent = 5
+mc_duty_percent = 5
+duty_window_s = 3600
+mesh_min_gap_s = 2.5
+mc_min_gap_s = 2.5
+# LoRa settings used only to estimate airtime (Meshtastic LONG_FAST, MeshCore EU/UK narrow)
+mesh_sf = 11
+mesh_bw_khz = 250
+mesh_cr = 5
+mc_sf = 8
+mc_bw_khz = 62.5
+mc_cr = 8
+log_level = INFO
+stats_interval_s = 300

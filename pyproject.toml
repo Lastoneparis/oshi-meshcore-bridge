@@ -3,9 +3,9 @@ requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "akita-mesh-bridge"
+name = "oshi-meshcore-bridge"
 version = "2.2.0"
-description = "Bridge between Meshtastic and MeshCore networks"
+description = "Akita Meshtastic-MeshCore bridge with an OSHI Mesh Protocol transport"
 readme = "README.md"
 requires-python = ">=3.10"
 dynamic = ["dependencies"]
@@ -36,11 +36,12 @@ Issues = "https://github.com/AkitaEngineering/Akita-Meshtastic-Meshcore-Bridge/i
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools]
-packages = ["ammb"]
+packages = ["ammb", "oshi_bridge"]
 py-modules = [
     "run_bridge",
     "run_bridge_async",
-    "run_bridge_tui"
+    "run_bridge_tui",
+    "run_oshi_bridge"
 ]
 
 [tool.setuptools.data-files]
@@ -55,6 +56,7 @@ py-modules = [
 run-bridge = "run_bridge:main"
 run-bridge-async = "run_bridge_async:main"
 run-bridge-tui = "run_bridge_tui:main"
+run-oshi-bridge = "oshi_bridge.runner:main"
 
 [tool.mypy]
 python_version = "3.10"
@@ -63,5 +65,5 @@ warn_unused_ignores = false
 follow_imports = "skip"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "tests_oshi"]
 addopts = "-q"

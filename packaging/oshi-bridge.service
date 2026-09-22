@@ -1,0 +1,33 @@
+[Unit]
+Description=OSHI MeshCore bridge (OMP relay)
+Documentation=https://github.com/Lastoneparis/oshi-meshcore-bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ammb
+Group=dialout
+WorkingDirectory=/opt/ammb
+Environment=OSHI_BRIDGE_CONFIG=/etc/ammb/oshi_bridge.ini
+ExecStart=/opt/ammb/.venv/bin/python /opt/ammb/run_oshi_bridge.py --config /etc/ammb/oshi_bridge.ini
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+# Serial devices need to remain visible to the service.
+SupplementaryGroups=dialout
+
+[Install]
+WantedBy=multi-user.target

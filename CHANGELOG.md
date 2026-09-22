@@ -2,6 +2,17 @@
 
 **Last Updated: August 17, 2026**
 
+## OSHI fork 0.1.0 - OSHI transport (September 23, 2026)
+
+Modified version of AMMB 2.2.0 by Lastoneparis (GPL-3.0-only, section 5a notice). Upstream files are unchanged
+except README.md, CHANGELOG.md and pyproject.toml.
+
+- **`oshi_bridge/`**: relays OSHI Mesh Protocol (OMP) frames between Meshtastic (`PRIVATE_APP`, "OSHI"
+  channel) and MeshCore (group-channel datagrams, `CMD_SEND_CHANNEL_DATA`), with envelope re-fragmentation,
+  loop/duplicate suppression, SACK-to-RECEIPT translation, bridge-to-bridge fragment repair and an airtime budget.
+- **`run_oshi_bridge.py`**, `examples/oshi_bridge.ini.example`, `packaging/oshi-bridge.service`.
+- **`tests_oshi/`**: hardware-free tests and a two-network simulation.
+
 ## Version 2.2.0 - Production Hardening (August 17, 2026)
 
 ### Fixes
