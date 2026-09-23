@@ -36,9 +36,15 @@ FLAG_CUSTODY_OK = 1 << 0
 FLAG_VIA_CUSTODY = 1 << 1
 FLAG_CUSTODY_REQ = 1 << 2
 
+# BEACON caps (BeaconCaps in OshiProtocol.h)
+CAP_CUSTODIAN = 1 << 0
+CAP_GATEWAY_ONLINE = 1 << 1
+CAP_BRIDGE = 1 << 2  # the firmware accepts a RECEIPT from a node whose fresh beacon carries this
+
 _PREFIX = 3
 _SACK_LEN = _PREFIX + 4 + 4 + 1 + 8
 _NOTICE_LEN = _PREFIX + 4 + 4 + 4
+_BEACON_LEN = _PREFIX + 1 + 2 + 1
 
 
 class FrameType(IntEnum):
@@ -132,6 +138,23 @@ class NoticeFrame:
         if self.type not in (FrameType.CUSTODY, FrameType.RECEIPT):
             raise ValueError("not a notice type")
         return _prefix(self.type) + struct.pack("<III", self.msg_id, self.origin, self.dest)
+
+
+@dataclass(frozen=True)
+class BeaconFrame:
+    caps: int
+    version: int = VERSION << 8  # OMP_IMPL_VERSION: (OMP_VERSION << 8) | 0
+    custody_free_kb: int = 0
+
+    def encode(self) -> bytes:
+        return _prefix(FrameType.BEACON) + struct.pack("<BHB", self.caps, self.version, self.custody_free_kb)
+
+
+def decode_beacon(buf: bytes) -> Optional[BeaconFrame]:
+    if frame_type(buf) != FrameType.BEACON or len(buf) < _BEACON_LEN:
+        return None
+    caps, version, free_kb = struct.unpack_from("<BHB", buf, _PREFIX)
+    return BeaconFrame(caps, version, free_kb)
 
 
 Frame = Union[DataFrame, SackFrame, NoticeFrame]

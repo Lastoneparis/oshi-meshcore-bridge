@@ -66,13 +66,14 @@ def test_runner_relays_both_ways():
         back = fragments(2, DEST, ORIGIN, b"reply")[0]
         mc.sink(wire.split(back, 0xB0000002, 1)[0])
         for _ in range(100):
-            if mc.sent and mesh.sent:
+            if mc.sent and len(mesh.sent) >= 2:
                 break
             await asyncio.sleep(0.02)
         r.stop()
         assert await task == 0
         assert wire.parse(mc.sent[0]).chunk == fr
-        assert mesh.sent == [(back, 0xFFFFFFFF)]
+        assert [m for m in mesh.sent if m[0][:3] != b"OS\x15"] == [(back, 0xFFFFFFFF)]
+        assert mesh.sent[0] == (bytes.fromhex("4f53150400" "0100"), 0xFFFFFFFF)  # CAP_BRIDGE beacon at start
 
     asyncio.run(go())
 

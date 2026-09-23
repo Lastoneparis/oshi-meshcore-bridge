@@ -38,6 +38,13 @@ def test_rejects_malformed():
     assert omp.decode(bytes.fromhex("4f5315") + b"\x01\x00\x01\x05") is None  # BEACON not relayed
 
 
+def test_beacon_layout():
+    assert omp.BeaconFrame(omp.CAP_BRIDGE).encode() == bytes.fromhex("4f5315" "04" "0001" "00")
+    assert omp.decode_beacon(bytes.fromhex("4f5315" "03" "0001" "05")) == omp.BeaconFrame(3, 0x0100, 5)
+    assert omp.decode_beacon(bytes.fromhex("4f5315" "04")) is None
+    assert omp.CAP_BRIDGE == 4
+
+
 def test_max_frame_is_200():
     f = omp.DataFrame(1, 2, 3, 0, 1, 0, b"z" * omp.MAX_FRAG_DATA)
     assert len(f.encode()) == 200

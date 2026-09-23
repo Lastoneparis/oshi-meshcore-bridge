@@ -25,6 +25,7 @@ The two cannot share the same radios at the same time: a serial port has one own
 | `DATA` broadcast on any channel (normally the private `OSHI` channel) | sent byte-for-byte into MeshCore; the far bridge re-injects it as a `PRIVATE_APP` broadcast on its `OSHI` channel. The OMP header carries `origin` and final `dest`, so the destination accepts it even though its Meshtastic `from` is the bridge. |
 | `SACK` from the destination to the far bridge | **not relayed as-is** (see below). Complete → the far bridge sends an OMP `RECEIPT` over MeshCore, and the near bridge DMs it to the origin, whose phone shows *delivered*. Partial → the far bridge re-injects the fragments it holds and asks the near bridge (an OMP SACK over MeshCore) for the ones it never received. |
 | `DATA` to `OMP_DEST_INTERNET`, `CUSTODY`, `BEACON`, `PULL`, `STATUS` | never relayed. They are link-local; a relayed `BEACON` would make OSHI nodes pick the bridge as a custodian, which it is not. |
+| *(own)* `BEACON` | each bridge broadcasts its own OMP BEACON on its Meshtastic `OSHI` channel at start and every `beacon_interval_s` (900 s): `4F 53 15 04 00 01 00` = caps `CAP_BRIDGE` (1<<2) only, version 0x0100, custodyFreeKb 0. Never `CAP_CUSTODIAN` / `CAP_GATEWAY_ONLINE`. It goes through the same airtime budget, ahead of data. |
 | Anything that is not `PRIVATE_APP` starting with `OS` v1 | ignored. |
 
 On MeshCore, frames travel as **group-channel datagrams** (`PAYLOAD_TYPE_GRP_DATA`, companion command
@@ -52,9 +53,15 @@ recovers the frame.
 
 In `oshi-mesh-firmware`, `Outbox::onSack` only accepts a SACK whose Meshtastic sender is the node the
 message was sent to (`e.linkTo == from`). A SACK re-injected by a bridge comes from the bridge's node
-number, so the origin would silently ignore it. `RECEIPT` is accepted from any sender that passes
-`controlFrameTrusted` and names the origin, so that is what the bridge sends back. See
-[Firmware changes that would help](#firmware-changes-that-would-help) for what this does *not* fix.
+number, so the origin would silently ignore it. Since firmware `b960d30` (branch `oshi`), a `RECEIPT` is
+accepted from the custodian the message was handed to, **or from a node whose last BEACON (fresh within
+1 h) carries `CAP_BRIDGE`**, still over PKI when the origin holds that node's key (`controlFrameTrusted`).
+That is why the bridge beacons. The RECEIPT then ends the origin's outbox entry as DELIVERED
+(`Outbox::onReceipt`), so it stops retrying.
+
+After its first beacon, expect OSHI nodes that lack the bridge's key to send it a NodeInfo DM with
+`want_response`; the bridge radio's stock NodeInfo module answers, the node learns the bridge's key, and
+later RECEIPTs are PKI-authenticated.
 
 ### Loops, duplicates, duty cycle
 
@@ -126,7 +133,8 @@ pytest tests_oshi
 
 No hardware needed. `tests_oshi/sim.py` builds an in-memory world (two Meshtastic islands, a MeshCore
 medium, OSHI end nodes modelled on `OshiModule::receiveData`) and checks: a 3-fragment message crossing
-and the origin getting its RECEIPT, repair of a fragment lost on MeshCore and of one lost on the far
+and the origin getting its RECEIPT (accepted only after the bridge's CAP_BRIDGE beacon, as in firmware
+`b960d30`), the beacon bytes / timing / budget, repair of a fragment lost on MeshCore and of one lost on the far
 mesh, two bridges on joined islands not looping, two near bridges delivering once, duty-cycle and queue
 bounds, forged SACKs ignored, the exact companion command bytes, and the runner's thread/async wiring.
 
@@ -140,12 +148,15 @@ bounds, forged SACKs ignored, the exact companion command bytes, and the runner'
   behind a bridge is normally never heard, so its key is normally unknown and frames go out as broadcasts,
   but an origin that learned the key earlier (e.g. both were once in range) will send DMs the bridge cannot
   carry. Fix: firmware change 2 below.
-* **The origin keeps retrying after delivery.** RECEIPT only updates the phone; the outbox entry keeps
-  polling for up to 5 rounds, then parks the message and reports FAILED after 72 h (`parkedTtlMs`). The
-  phone shows *delivered* first, but may later show *in custody* / *failed*. Fix: firmware change 1 below.
-* **RECEIPT auth.** The origin accepts the bridge's RECEIPT only if it is PKI-encrypted whenever the origin
-  holds the bridge's key. The bridge sends it as a DM, which Meshtastic firmware PKI-encrypts when the
-  bridge radio holds the origin's key; if only one side has the other's key, the RECEIPT is dropped.
+* **Needs OSHI firmware `b960d30` or later on the OSHI nodes.** Older firmware accepts RECEIPTs only from
+  custodians (`3fa73f3`) and ignores `CAP_BRIDGE`, so the phone never shows *delivered* for a bridged
+  message and the origin retries until it parks it.
+* **RECEIPT auth.** The origin accepts the bridge's RECEIPT only while the bridge's beacon is under 1 h old,
+  and only PKI-encrypted whenever the origin holds the bridge's key. The bridge sends it as a DM, which
+  Meshtastic firmware PKI-encrypts when the bridge radio holds the origin's key; if only one side has the
+  other's key, the RECEIPT is dropped. The NodeInfo exchange triggered by the beacon should normally fix
+  that; unverified on air. If the RECEIPT arrives before the beacon (e.g. the bridge just restarted), it is
+  lost; the origin's next poll gets a fresh one.
 * **Anyone on the MeshCore channel can inject frames** (group datagrams are unauthenticated). OMP bodies are
   end-to-end protected by the OSHI envelope, but a forged RECEIPT could show a false *delivered*. Use a
   private `channel_secret_hex` among trusted bridges.
@@ -155,38 +166,26 @@ bounds, forged SACKs ignored, the exact companion command bytes, and the runner'
 * **Two near bridges** in range of the same origin both send each frame into MeshCore (the far bridge
   delivers it once). One bridge per island is the intended layout.
 
-## Firmware changes that would help
+## Firmware changes
 
-Proposed for `oshi-mesh-firmware` (not applied here):
+Done in `oshi-mesh-firmware` (branch `oshi`, `b960d30`):
 
-1. **Finish the outbox on RECEIPT** so a bridged message stops retrying once delivered. In
-   `src/oshi/OshiOutbox.h` add `void onReceipt(const NoticeFrame &n, uint32_t nowMs);` and in
-   `OshiOutbox.cpp`:
-   ```cpp
-   void Outbox::onReceipt(const NoticeFrame &n, uint32_t nowMs)
-   {
-       (void)nowMs;
-       for (auto &e : entries)
-           if (e.msg.msgId == n.msgId && e.msg.origin == n.origin && e.msg.dest == n.dest && e.state != State::DONE) {
-               finish(e, MsgState::DELIVERED, n.dest);
-               return;
-           }
-   }
-   ```
-   and in `OshiModule::handleOmp`, `case FrameType::RECEIPT`, call `outbox.onReceipt(nf, now);` next to
-   `statusToPhone(s)` (and skip the `statusToPhone` there when `onReceipt` already emitted DELIVERED, to
-   avoid two status frames).
-2. **Do not DM a destination that is not directly heard.** In `OshiModule::transmit`, use PKI only when the
+* **The outbox ends on RECEIPT** (`Outbox::onReceipt`, sending / awaiting / parked -> DELIVERED), so a
+  bridged message stops retrying once delivered.
+* **`CAP_BRIDGE` (1<<2) in `BeaconCaps`**: a RECEIPT is accepted from a node whose fresh beacon carries it.
+
+Still proposed (not applied):
+
+1. **Do not DM a destination that is not directly heard.** In `OshiModule::transmit`, use PKI only when the
    destination was heard recently (e.g. `nodeDB->getMeshNode(linkTo)->last_heard` within 2 h and
    `hops_away` known), otherwise broadcast on the OSHI channel as today. Frames then remain visible to a
    bridge whenever the destination is not local.
-3. **A `FLAG_VIA_BRIDGE` (1 << 3) DATA flag**, set by a far bridge when it re-injects (the bridge would
-   rewrite the flags byte at offset 17). A destination seeing it would SACK as usual but the origin could
-   treat the bridge's RECEIPT as authoritative and the app could show "via MeshCore". It would also let a
-   second bridge on the same mesh refuse to carry it back, instead of relying on timing windows.
-4. **Optional: accept a bridge's SACK.** `Outbox::onSack` could accept a SACK from a node that advertises a
-   new `CAP_BRIDGE` bit in its BEACON when `e.linkTo` is not directly heard. That would let partial-SACK
-   repair reach the origin itself instead of being handled bridge-to-bridge.
+2. **A `FLAG_VIA_BRIDGE` (1 << 3) DATA flag**, set by a far bridge when it re-injects (the bridge would
+   rewrite the flags byte at offset 17). The app could show "via MeshCore", and a second bridge on the same
+   mesh could refuse to carry it back instead of relying on timing windows.
+3. **Accept a `CAP_BRIDGE` node's partial SACK.** `Outbox::onSack` could take a SACK from a CAP_BRIDGE
+   node when `e.linkTo` is not directly heard, so partial-SACK repair reaches the origin itself instead of
+   being handled bridge-to-bridge.
 
 ---
 

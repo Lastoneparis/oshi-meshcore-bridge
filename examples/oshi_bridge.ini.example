@@ -31,6 +31,9 @@ data_type = 0xFF4F
 
 [bridge]
 forward_broadcast = true
+# OMP BEACON with CAP_BRIDGE on the OSHI channel; OSHI firmware only accepts the bridge's
+# RECEIPTs while its last beacon is < 1 h old. Must stay below 3600; 0 disables.
+beacon_interval_s = 900
 inject_only_known_dests = false
 strict_sack_auth = false
 # bytes per MeshCore datagram, envelope included (MeshCore accepts up to 163-165)

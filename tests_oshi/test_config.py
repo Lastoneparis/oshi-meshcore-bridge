@@ -11,6 +11,7 @@ def test_example_config_loads():
     assert c.mc_channel_name == "#oshi-bridge" and len(c.mc_secret) == 16
     assert c.data_type == 0xFF4F
     assert c.bridge.max_datagram == 160
+    assert c.bridge.beacon_interval_s == 900
     assert c.bridge.mesh_lora.sf == 11 and c.bridge.mc_lora.bw_khz == 62.5
 
 

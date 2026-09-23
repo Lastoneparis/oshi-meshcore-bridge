@@ -107,6 +107,9 @@ def load(path: str) -> Config:
     s.duty_window_s = b.getfloat("duty_window_s", s.duty_window_s)
     s.mesh_min_gap_s = b.getfloat("mesh_min_gap_s", s.mesh_min_gap_s)
     s.mc_min_gap_s = b.getfloat("mc_min_gap_s", s.mc_min_gap_s)
+    s.beacon_interval_s = b.getfloat("beacon_interval_s", s.beacon_interval_s)
+    if 0 < s.beacon_interval_s and s.beacon_interval_s >= 3600:
+        raise ValueError("bridge.beacon_interval_s must stay below 3600 (the firmware's beacon freshness)")
     s.mesh_lora = _lora(b, "mesh", s.mesh_lora)
     s.mc_lora = _lora(b, "mc", s.mc_lora)
     c.log_level = b.get("log_level", c.log_level)

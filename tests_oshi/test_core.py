@@ -103,7 +103,7 @@ def test_two_bridges_between_joined_islands_do_not_ping_pong():
     run(clock, [a, b], 900, step=1.0)
     data_on_air = [dg for _, dg in air.log if wire.parse(dg).chunk[:3] == b"OS\x11"]
     assert 1 <= len(data_on_air) <= 2  # each bridge at most once, never a loop
-    data_injected = [p for f, _, p in mesh.log if f in (BRIDGE_A, BRIDGE_B)]
+    data_injected = [p for f, _, p in mesh.log if f in (BRIDGE_A, BRIDGE_B) and omp.frame_type(p) == omp.FrameType.DATA]
     assert len(data_injected) <= 2
 
 
@@ -123,7 +123,8 @@ def test_two_near_bridges_one_far_bridge_deliver_once():
 
 def test_ignored_traffic():
     sent = []
-    core = OshiBridgeCore(BRIDGE_A, lambda p, t: sent.append(p), lambda d: sent.append(d))
+    core = OshiBridgeCore(BRIDGE_A, lambda p, t: sent.append(p), lambda d: sent.append(d),
+                          BridgeSettings(beacon_interval_s=0))
     beacon = bytes.fromhex("4f5315") + b"\x01\x00\x01\x05"
     core.on_mesh_packet(ORIGIN, BCAST, 256, beacon)  # BEACON: link-local
     core.on_mesh_packet(ORIGIN, BCAST, 1, fragments(1, ORIGIN, DEST, b"a")[0])  # TEXT_MESSAGE_APP
@@ -173,7 +174,7 @@ def test_strict_sack_auth_requires_pki_when_key_known():
 def test_inject_only_known_dests():
     out = []
     core = OshiBridgeCore(BRIDGE_B, lambda p, t: out.append(p), lambda d: None,
-                          BridgeSettings(inject_only_known_dests=True), node_known=lambda n: n == DEST)
+                          BridgeSettings(inject_only_known_dests=True, beacon_interval_s=0), node_known=lambda n: n == DEST)
     core.on_mc_datagram(wire.split(fragments(1, ORIGIN, 0x0D0D0D0D, b"a")[0], BRIDGE_A, 1)[0])
     core.on_mc_datagram(wire.split(fragments(2, ORIGIN, DEST, b"a")[0], BRIDGE_A, 2)[0])
     core.pump()
@@ -206,3 +207,62 @@ def test_queue_bound_prefers_control_traffic():
         core.on_mesh_packet(ORIGIN, BCAST, 256, fragments(200 + i, ORIGIN, DEST, b"a")[0])
     assert len(core.to_mc) == 4
     assert core.to_mc.dropped_full == 6
+
+
+def test_bridge_beacons_cap_bridge_at_start_and_every_interval():
+    clock = Clock()
+    sent = []
+    core = OshiBridgeCore(BRIDGE_A, lambda p, t: sent.append((clock.t, p, t)), lambda d: None, clock=clock)
+    t0 = clock.t
+    for _ in range(int(3700 / 0.5)):
+        core.pump()
+        clock.t += 0.5
+    beacons = [(t, p, to) for t, p, to in sent if omp.frame_type(p) == omp.FrameType.BEACON]
+    # "OS" 0x15 | caps = CAP_BRIDGE | version 0x0100 LE | custodyFreeKb 0
+    assert beacons[0][1] == bytes.fromhex("4f5315" "04" "0001" "00")
+    assert all(to == BCAST for _, _, to in beacons)
+    assert beacons[0][0] == t0
+    assert [round(t - t0) for t, _, _ in beacons] == [0, 900, 1800, 2700, 3600]
+    b = omp.decode_beacon(beacons[0][1])
+    assert b.caps == omp.CAP_BRIDGE and not b.caps & (omp.CAP_CUSTODIAN | omp.CAP_GATEWAY_ONLINE)
+
+
+def test_beacon_waits_for_airtime_and_is_not_duplicated():
+    clock = Clock()
+    sent = []
+    s = BridgeSettings(mesh_min_gap_s=0, mesh_duty_percent=0.1, duty_window_s=3600)  # 3.6 s per hour
+    core = OshiBridgeCore(BRIDGE_A, lambda p, t: sent.append(p), lambda d: None, s, clock=clock)
+    for i in range(3):  # queue DATA ahead of the first pump; the beacon still goes first
+        core.on_mc_datagram(wire.split(fragments(50 + i, ORIGIN, DEST, b"d" * 182)[0], BRIDGE_B, i + 1)[0])
+    core.pump()
+    assert omp.frame_type(sent[0]) == omp.FrameType.BEACON  # control traffic goes first
+    n_before = len(core.to_mesh)
+    clock.t += 1000  # interval elapsed while DATA is still waiting for budget
+    core.pump()
+    clock.t += 1000
+    core.pump()
+    beacons_queued = sum(1 for it in core.to_mesh._heap if it.label == "beacon")
+    assert beacons_queued <= 1
+    assert len(core.to_mesh) <= n_before + 1
+
+
+def test_beacon_disabled():
+    sent = []
+    core = OshiBridgeCore(BRIDGE_A, lambda p, t: sent.append(p), lambda d: None, BridgeSettings(beacon_interval_s=0))
+    core.pump()
+    assert sent == []
+
+
+def test_origin_rejects_receipt_without_bridge_beacon():
+    clock, west, east, air, origin, dest, a, b = world(BridgeSettings(beacon_interval_s=0))
+    origin.send_message(0x77, DEST, b"hi")
+    run(clock, [a, b], 60)
+    assert dest.delivered and not origin.receipts and origin.rejected_receipts == 1
+
+
+def test_bridge_does_not_relay_beacons():
+    clock, west, east, air, origin, dest, a, b = world()
+    run(clock, [a, b], 5)
+    assert air.log == []  # both bridges beaconed locally; nothing crossed MeshCore
+    assert BRIDGE_A in origin.bridges and BRIDGE_B in dest.bridges
+    assert BRIDGE_B not in origin.bridges

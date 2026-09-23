@@ -20,6 +20,10 @@ What crosses, and why (see README "Why SACKs are not relayed as-is"):
       bridge (an OMP SACK over MeshCore) for the ones it never got.
 * CUSTODY / BEACON / PULL / STATUS never cross: they are link-local by design, and a
   relayed BEACON would make OSHI nodes believe the bridge is a custodian.
+* The bridge broadcasts its own OMP BEACON (caps = CAP_BRIDGE only) on its Meshtastic side
+  at start and every ``beacon_interval_s``: the firmware accepts a RECEIPT only from the
+  custodian it handed the message to, or from a node whose fresh (< 1 h) beacon carries
+  CAP_BRIDGE (and over PKI when it holds that node's key).
 """
 
 from __future__ import annotations
@@ -75,6 +79,9 @@ class BridgeSettings:
     duty_window_s: float = 3600.0
     mesh_min_gap_s: float = 2.5
     mc_min_gap_s: float = 2.5
+    # OMP BEACON with CAP_BRIDGE on the Meshtastic side: without a fresh one (< 1 h) the OSHI
+    # firmware rejects the bridge's RECEIPTs. 0 disables.
+    beacon_interval_s: float = 900.0
 
 
 @dataclass
@@ -190,6 +197,7 @@ class OshiBridgeCore:
         )
         self._seq = itertools.count()
         self._env_seq = 0
+        self._next_beacon: Optional[float] = None  # None = at the first pump
         self.stats: Dict[str, int] = {
             "mesh_rx_omp": 0,
             "mc_rx_omp": 0,
@@ -201,6 +209,7 @@ class OshiBridgeCore:
             "repair_to_mc": 0,
             "repair_requests": 0,
             "send_errors": 0,
+            "beacons": 0,
         }
 
     # ------------------------------------------------------------------ Meshtastic side
@@ -349,6 +358,22 @@ class OshiBridgeCore:
         self._to_mesh(r.encode(), origin, PRIO_CONTROL, "receipt")
         self.stats["receipts_to_origin"] += 1
 
+    # ------------------------------------------------------------------ beacon
+
+    def _maybe_beacon(self) -> None:
+        if self.s.beacon_interval_s <= 0:
+            return
+        now = self.clock()
+        if self._next_beacon is not None and now < self._next_beacon:
+            return
+        if any(it.label == "beacon" for it in self.to_mesh._heap):
+            return  # still waiting for airtime
+        self._next_beacon = now + self.s.beacon_interval_s
+        # CAP_BRIDGE only: never CAP_CUSTODIAN / CAP_GATEWAY_ONLINE, the bridge holds nothing.
+        b = omp.BeaconFrame(caps=omp.CAP_BRIDGE, custody_free_kb=0)
+        self._to_mesh(b.encode(), BROADCAST_NUM, PRIO_CONTROL, "beacon")
+        self.stats["beacons"] += 1
+
     # ------------------------------------------------------------------ queues
 
     def _to_mesh(self, payload: bytes, to: int, prio: int, label: str) -> None:
@@ -363,6 +388,7 @@ class OshiBridgeCore:
 
     def pump(self) -> float:
         """Send whatever the budgets allow. Returns seconds until it is worth calling again."""
+        self._maybe_beacon()
         wake = 1.0
         for q, send in ((self.to_mesh, lambda it: self.mesh_send(it.payload, it.to)),
                         (self.to_mc, lambda it: self.mc_send(it.payload))):

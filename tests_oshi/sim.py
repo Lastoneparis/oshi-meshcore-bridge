@@ -89,6 +89,8 @@ class OshiNode:
     receipts: List[Tuple[int, int, int]] = field(default_factory=list)  # (from, msgId, dest)
     sacks_sent: List[Tuple[int, omp.SackFrame]] = field(default_factory=list)
     seen: Set[Tuple[int, int]] = field(default_factory=set)
+    bridges: Set[int] = field(default_factory=set)  # nodes whose beacon carried CAP_BRIDGE
+    rejected_receipts: int = 0
 
     def __post_init__(self):
         self.island.members.append(self)
@@ -113,7 +115,17 @@ class OshiNode:
                 self.seen.add(key)
                 self.delivered.append((f.origin, f.msg_id, b"".join(frags[i] for i in range(f.count))))
         elif isinstance(f, omp.NoticeFrame) and f.type == omp.FrameType.RECEIPT and f.origin == self.num:
-            self.receipts.append((frm, f.msg_id, f.dest))
+            # firmware b960d30: only the custodian it handed off to, or a CAP_BRIDGE beacon sender
+            if frm in self.bridges:
+                self.receipts.append((frm, f.msg_id, f.dest))
+            else:
+                self.rejected_receipts += 1
+        b = omp.decode_beacon(payload)
+        if b is not None:
+            if b.caps & omp.CAP_BRIDGE:
+                self.bridges.add(frm)
+            else:
+                self.bridges.discard(frm)
 
     def _sack(self, to: int, origin: int, msg_id: int, count: int, have: int) -> None:
         s = omp.SackFrame(msg_id, origin, count, have)
