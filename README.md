@@ -2,7 +2,7 @@
 
 A fork of the [Akita Meshtastic-MeshCore Bridge](https://github.com/AkitaEngineering/Akita-Meshtastic-Meshcore-Bridge)
 (GPL-3.0) with one addition: an **OSHI transport** (`oshi_bridge/`, `run_oshi_bridge.py`). It relays
-[OSHI Mesh Protocol](https://github.com/Lastoneparis/oshi-mesh-firmware/tree/oshi/src/oshi) (OMP) frames
+[OSHI Mesh Protocol](https://github.com/Lastoneparis/oshi-mesh-protocol) (OMP) frames
 between a Meshtastic mesh and a MeshCore mesh, so an OSHI message can reach its destination
 across both networks:
 
@@ -32,6 +32,10 @@ On MeshCore, frames travel as **group-channel datagrams** (`PAYLOAD_TYPE_GRP_DAT
 `CMD_SEND_CHANNEL_DATA` = 0x3E, received as `RESP_CODE_CHANNEL_DATA_RECV` = 0x1B) on a dedicated channel
 (default `#oshi-bridge`, slot 7) with `data_type = 0xFF4F`. A MeshCore user who does not carry that
 channel cannot decrypt them and never sees them; repeaters relay them like any other flood packet.
+
+The envelope and the MeshCore binding are specified in
+[oshi-mesh-protocol/spec/TRANSPORTS.md](https://github.com/Lastoneparis/oshi-mesh-protocol/blob/main/spec/TRANSPORTS.md),
+with an MIT reference codec and test vectors, so other apps and firmwares can speak it.
 
 ### MeshCore payload limit and re-fragmentation
 
