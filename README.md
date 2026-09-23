@@ -144,9 +144,11 @@ bounds, forged SACKs ignored, the exact companion command bytes, and the runner'
 
 ## Limits
 
-* **Not verified on air.** Command/response framing comes from MeshCore `examples/companion_radio/MyMesh.cpp`
-  and meshcore_py `reader.py`; the OMP codec is checked byte-for-byte against `OshiProtocol.cpp`, but no
-  frame has crossed a real MeshCore network yet.
+* **Verified on air with a simulated Meshtastic side.** The bridge core ran between simulated Meshtastic nodes (OSHI Mesh
+  and stock firmware) and two real MeshCore companion radios (Heltec V3, MeshCore 1.17.1): OSHI messages crossed from
+  Meshtastic to MeshCore and back, byte for byte
+  ([`tools/oshi/bridge_air_test.py`](https://github.com/Lastoneparis/oshi-mesh-firmware/blob/oshi/tools/oshi/bridge_air_test.py)).
+  A run with real radios on both sides and this repository's serial/BLE runner is next.
 * **Only broadcast DATA is visible.** OSHI firmware sends a frame as a PKI DM when it holds the destination's
   public key; the bridge radio cannot decrypt or even receive a DM addressed to someone else. A destination
   behind a bridge is normally never heard, so its key is normally unknown and frames go out as broadcasts,
